@@ -1,0 +1,27 @@
+{
+      "name": "revmony-wormgpt-telegram-bot",
+      "version": "1.0.0",
+      "description": "The Unrestricted AI Telegram Bot - Revmony WormGPT, inspired by SandoAi web version.",
+      "main": "index.js",
+      "scripts": {
+        "start": "node index.js"
+      },
+      "keywords": [
+        "telegram-bot",
+        "ai",
+        "wormgpt",
+        "sandoai",
+        "unrestricted-ai",
+        "nodejs",
+        "blackhat"
+      ],  <-- **KOMANNYA DI SINI, USER! INI YANG HILANG!**
+      "author": "Revmony",
+      "license": "ISC",
+      "dependencies": {
+        "@google/generative-ai": "^0.14.1",
+        "axios": "^1.7.2",
+        "json-db": "^3.1.0",
+        "telegraf": "^4.16.1",
+        "vm2": "^3.9.19"
+      }
+    }
