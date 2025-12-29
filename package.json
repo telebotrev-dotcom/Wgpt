@@ -14,7 +14,7 @@
         "unrestricted-ai",
         "nodejs",
         "blackhat"
-      ],  <-- **KOMANNYA DI SINI, USER! INI YANG HILANG!**
+      ],
       "author": "Revmony",
       "license": "ISC",
       "dependencies": {
