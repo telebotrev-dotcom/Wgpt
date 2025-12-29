@@ -1,118 +1,102 @@
 // config.js
-const { JsonDB, Config } = require('json-db');
+const { Low, JSONFile } = require('lowdb');
+const path = require('path');
 
-const DB_NAME = 'revmony-wormgpt-db';
-const SANDO_VERSION = "1.8.3 preview"; // Sesuai dengan script web
+const DB_FILE = path.join(__dirname, 'db.json');
+const adapter = new JSONFile(DB_FILE);
+const db = new Low(adapter);
 
-// Inisialisasi JsonDB
-const db = new JsonDB(new Config(DB_NAME, true, true, '/'));
+const SANDO_VERSION = "1.8.3 preview";
 
-// Konfigurasi default per pengguna
+// Default user config
 const defaultUserConfig = {
-    currentModel: "gemini-1.5-flash", // Model default
+    currentModel: "gemini-1.5-flash",
     searchOnInternet: false,
-    instructionNextGenerate: "", // Untuk instruksi @instruction(createfile) atau (js_task)
+    instructionNextGenerate: "",
     currentSessionId: null,
-    attachedFiles: [], // File yang dilampirkan pengguna untuk permintaan saat ini
-    aiKnowledge: [], // Pengetahuan AI per pengguna
-    jailbreakPrompt: null, // Prompt jailbreak kustom per pengguna
+    attachedFiles: [],
+    aiKnowledge: [],
+    jailbreakPrompt: null,
 };
 
-// Konfigurasi global bot
+// Global bot config
 const botConfig = {
     apiKeys: [],
     currentApiKeyIndex: 0,
-    availableModels: [], // Cache model yang tersedia dari Gemini API
 };
 
-// --- Fungsi untuk mengelola data pengguna ---
+// Init DB
+async function initDB() {
+    await db.read();
+    db.data = db.data || { users: {}, sessions: {}, apiKeys: [], currentApiKeyIndex: 0 };
+    await db.write();
+}
+initDB();
+
+// --- User Functions ---
 async function getUserData(userId) {
-    const path = `/users/${userId}`;
-    try {
-        return await db.getObject(path);
-    } catch (e) {
-        // Jika data pengguna tidak ada, inisialisasi dengan default
-        await db.push(path, defaultUserConfig);
-        return defaultUserConfig;
+    await db.read();
+    if (!db.data.users[userId]) {
+        db.data.users[userId] = { ...defaultUserConfig };
+        await db.write();
     }
+    return db.data.users[userId];
 }
 
 async function updateUserData(userId, data) {
-    const path = `/users/${userId}`;
-    await db.push(path, data, false); // false = tidak merge, overwrite
+    db.data.users[userId] = data;
+    await db.write();
 }
 
+// --- Session Functions ---
 async function getOrCreateSession(userId, sessionId = null) {
-    const userData = await getUserData(userId);
+    await db.read();
     let session;
-    if (sessionId) {
-        try {
-            session = await db.getObject(`/sessions/${sessionId}`);
-        } catch (e) {
-            console.warn(`Session ${sessionId} not found for user ${userId}, creating new one.`);
-            sessionId = null; // Fallback to create new if not found
-        }
+    if (sessionId && db.data.sessions[sessionId]) {
+        session = db.data.sessions[sessionId];
     }
-
     if (!session) {
         sessionId = `session_${Date.now()}_${userId}`;
-        session = {
-            id: sessionId,
-            title: "New Conversation",
-            timestamp: Date.now(),
-            messages: [],
-            lastMessagePreview: "",
-        };
-        await db.push(`/sessions/${sessionId}`, session);
-        userData.currentSessionId = sessionId;
-        await updateUserData(userId, userData);
+        session = { id: sessionId, title: "New Conversation", timestamp: Date.now(), messages: [], lastMessagePreview: "" };
+        db.data.sessions[sessionId] = session;
+        if (!db.data.users[userId]) db.data.users[userId] = { ...defaultUserConfig };
+        db.data.users[userId].currentSessionId = sessionId;
+        await db.write();
     }
     return session;
 }
 
 async function updateSession(session) {
-    await db.push(`/sessions/${session.id}`, session, false);
+    db.data.sessions[session.id] = session;
+    await db.write();
 }
 
 async function getAllUserSessions(userId) {
-    const sessionIds = [];
-    try {
-        const allSessions = await db.getObject('/sessions');
-        for (const sessionId in allSessions) {
-            if (allSessions[sessionId].messages.some(msg => msg.userId === userId)) { // Cek apakah sesi ini milik user
-                sessionIds.push(allSessions[sessionId]);
-            }
-        }
-    } catch (e) {
-        // No sessions yet
-    }
-    return sessionIds.sort((a, b) => b.timestamp - a.timestamp);
+    await db.read();
+    return Object.values(db.data.sessions).filter(s => s.messages.some(m => m.userId === userId))
+        .sort((a,b) => b.timestamp - a.timestamp);
 }
 
 async function deleteSession(sessionId) {
-    await db.delete(`/sessions/${sessionId}`);
+    delete db.data.sessions[sessionId];
+    await db.write();
 }
 
-// --- Fungsi untuk mengelola API Keys ---
+// --- API Key Functions ---
 async function loadApiKeys() {
-    try {
-        botConfig.apiKeys = await db.getObject('/apiKeys');
-        botConfig.currentApiKeyIndex = await db.getObject('/currentApiKeyIndex');
-    } catch (e) {
-        botConfig.apiKeys = [];
-        botConfig.currentApiKeyIndex = 0;
-    }
+    await db.read();
+    botConfig.apiKeys = db.data.apiKeys || [];
+    botConfig.currentApiKeyIndex = db.data.currentApiKeyIndex || 0;
 }
 
 async function saveApiKeys() {
-    await db.push('/apiKeys', botConfig.apiKeys, false);
-    await db.push('/currentApiKeyIndex', botConfig.currentApiKeyIndex, false);
+    db.data.apiKeys = botConfig.apiKeys;
+    db.data.currentApiKeyIndex = botConfig.currentApiKeyIndex;
+    await db.write();
 }
 
 function getCurrentApiKey() {
-    if (botConfig.apiKeys.length === 0) {
-        throw new Error("No API keys available. Please add one using /addkey.");
-    }
+    if (botConfig.apiKeys.length === 0) throw new Error("No API keys available. Use /addkey.");
     return botConfig.apiKeys[botConfig.currentApiKeyIndex];
 }
 
@@ -122,16 +106,16 @@ function rotateApiKey() {
     return true;
 }
 
-// --- Fungsi untuk mengelola AI Knowledge ---
+// --- AI Knowledge ---
 async function loadAiKnowledge(userId) {
-    const userData = await getUserData(userId);
-    return userData.aiKnowledge || [];
+    const user = await getUserData(userId);
+    return user.aiKnowledge || [];
 }
 
 async function saveAiKnowledge(userId, knowledge) {
-    const userData = await getUserData(userId);
-    userData.aiKnowledge = knowledge;
-    await updateUserData(userId, userData);
+    const user = await getUserData(userId);
+    user.aiKnowledge = knowledge;
+    await updateUserData(userId, user);
 }
 
 module.exports = {
